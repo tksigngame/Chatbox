@@ -38,13 +38,19 @@
     right: 20px;
     width: 320px;
     height: 420px;
+    min-width: 260px;
+    min-height: 320px;
+    max-width: 90vw;
+    max-height: 90vh;
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.3);
     display: none;
     flex-direction: column;
-    overflow: hidden;
+    overflow: auto;
+    resize: both;
     z-index: 9999;
+    transition: right 0.25s, width 0.25s, height 0.25s, border-radius 0.25s;
   }
   #chatWindow.open { display: flex; }
   #chatWindow.pip-mode {
@@ -53,6 +59,22 @@
     height: 100%;
     border-radius: 0;
     box-shadow: none;
+    resize: none;
+  }
+
+  /* Đẩy vào cạnh phải màn hình, chỉ chừa một dải nhỏ */
+  #chatWindow.docked {
+    width: 320px;
+    height: 420px;
+    right: -300px;
+    resize: none;
+    cursor: pointer;
+  }
+  #chatWindow.docked #chatHeader,
+  #chatWindow.docked #chatBody,
+  #chatWindow.docked #chatFooter {
+    pointer-events: none;
+    opacity: 0.35;
   }
 
   #chatHeader {
@@ -66,7 +88,7 @@
     font-size: 14px;
     flex-shrink: 0;
   }
-  #chatHeader .controls { cursor: pointer; font-size: 16px; padding: 0 6px; }
+  #chatHeader .controls { cursor: pointer; font-size: 15px; padding: 0 5px; }
 
   #chatBody {
     flex: 1;
@@ -152,7 +174,7 @@
   trước khi dùng. Lấy URL này ở Apps Script > Deploy > Manage deployments.
 -->
 <script>
-  var API_URL = https://script.google.com/macros/s/AKfycbx4BUYVqRLI5Kidm6G1tbIkCGQnYedF98kjzeTfCjVIfsjGk0RoBBukRAs8DfQ_uZZo;
+  var API_URL = https://script.google.com/macros/s/AKfycbxUhcmEtxiE-Zxcb7n9aNZmaeAvbdio6XO1hYCyPr8XRP_U1-b68etuGSU6PTD0cM2J;
 </script>
 
 <div id="bubble">💬</div>
@@ -161,9 +183,10 @@
   <div id="chatHeader">
     <span>Chat Box</span>
     <span>
+      <span class="controls" id="dockBtn" title="Ẩn vào cạnh màn hình">⇥</span>
       <span class="controls" id="pipBtn" title="Nổi cửa sổ ra ngoài (Picture-in-Picture)">📌</span>
-      <span class="controls" id="minimizeBtn">—</span>
-      <span class="controls" id="closeBtn">✕</span>
+      <span class="controls" id="minimizeBtn" title="Thu nhỏ">—</span>
+      <span class="controls" id="closeBtn" title="Đóng">✕</span>
     </span>
   </div>
   <div id="chatBody"></div>
@@ -178,17 +201,20 @@
 <script>
   var isOpen = false;
   var pipWindow = null;
+  var chatWindowEl = document.getElementById('chatWindow');
+  var historyLoaded = false;
 
   function toggleChat() {
     isOpen ? closeChat() : openChat();
   }
 
   function openChat() {
-    document.getElementById('chatWindow').classList.add('open');
+    chatWindowEl.classList.remove('docked');
+    chatWindowEl.classList.add('open');
     document.getElementById('taskbarTab').classList.remove('show');
     document.getElementById('bubble').style.display = 'none';
     isOpen = true;
-    loadHistory();
+    if (!historyLoaded) loadHistory();
   }
 
   function closeChat() {
@@ -196,7 +222,7 @@
       pipWindow.close();
       return;
     }
-    document.getElementById('chatWindow').classList.remove('open');
+    chatWindowEl.classList.remove('open', 'docked');
     document.getElementById('bubble').style.display = 'flex';
     document.getElementById('taskbarTab').classList.remove('show');
     isOpen = false;
@@ -207,17 +233,21 @@
       enterPiP();
       return;
     }
-    document.getElementById('chatWindow').classList.remove('open');
+    chatWindowEl.classList.remove('open');
     document.getElementById('bubble').style.display = 'none';
     document.getElementById('taskbarTab').classList.add('show');
     isOpen = false;
   }
 
   function restoreChat() {
-    document.getElementById('chatWindow').classList.add('open');
+    chatWindowEl.classList.add('open');
     document.getElementById('taskbarTab').classList.remove('show');
     isOpen = true;
-    loadHistory();
+  }
+
+  // Đẩy cửa sổ vào sát cạnh phải màn hình, chỉ chừa 1 dải nhỏ để bấm mở lại
+  function toggleDock() {
+    chatWindowEl.classList.toggle('docked');
   }
 
   async function enterPiP() {
@@ -254,46 +284,60 @@
     });
     pipWindow.document.body.style.margin = '0';
 
-    var chatWindow = document.getElementById('chatWindow');
-    chatWindow.classList.add('open', 'pip-mode');
-    pipWindow.document.body.appendChild(chatWindow);
+    chatWindowEl.classList.remove('docked');
+    chatWindowEl.classList.add('open', 'pip-mode');
+    pipWindow.document.body.appendChild(chatWindowEl);
 
     document.getElementById('bubble').style.display = 'none';
     document.getElementById('taskbarTab').classList.remove('show');
     isOpen = true;
 
     pipWindow.addEventListener('pagehide', function() {
-      chatWindow.classList.remove('pip-mode');
-      document.body.appendChild(chatWindow);
+      chatWindowEl.classList.remove('pip-mode');
+      document.body.appendChild(chatWindowEl);
       document.getElementById('bubble').style.display = 'flex';
       pipWindow = null;
       isOpen = false;
     });
   }
 
-  function renderMessages(history) {
-    var doc = pipWindow ? pipWindow.document : document;
+  function activeDoc() {
+    return pipWindow ? pipWindow.document : document;
+  }
+
+  // Thêm 1 tin nhắn trực tiếp vào khung chat, không cần tải lại toàn bộ lịch sử
+  function appendMessage(m) {
+    var doc = activeDoc();
     var bodyEl = doc.getElementById('chatBody');
     if (!bodyEl) return;
-    bodyEl.innerHTML = '';
-    history.forEach(function(m) {
-      var div = doc.createElement('div');
-      div.className = 'msg ' + (m.sender === 'user' ? 'user' : 'bot');
-      div.innerHTML = m.text.replace(/</g,'&lt;') + '<span class="time">' + m.time + '</span>';
-      bodyEl.appendChild(div);
-    });
+    var div = doc.createElement('div');
+    div.className = 'msg ' + (m.sender === 'user' ? 'user' : 'bot');
+    div.innerHTML = m.text.replace(/</g,'&lt;') + '<span class="time">' + m.time + '</span>';
+    bodyEl.appendChild(div);
     bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
+  function renderMessages(history) {
+    var doc = activeDoc();
+    var bodyEl = doc.getElementById('chatBody');
+    if (!bodyEl) return;
+    bodyEl.innerHTML = '';
+    history.forEach(appendMessage);
+  }
+
+  // Chỉ tải lịch sử 1 lần khi mở chat lần đầu; các tin nhắn sau được thêm trực tiếp
   function loadHistory() {
     fetch(API_URL + '?action=loadHistory')
       .then(function(res) { return res.json(); })
-      .then(renderMessages)
+      .then(function(history) {
+        renderMessages(history);
+        historyLoaded = true;
+      })
       .catch(function(err) { console.error('Lỗi tải lịch sử:', err); });
   }
 
   function send() {
-    var doc = pipWindow ? pipWindow.document : document;
+    var doc = activeDoc();
     var input = doc.getElementById('chatInput');
     var text = input.value.trim();
     if (!text) return;
@@ -306,9 +350,10 @@
       body: new URLSearchParams({ action: 'sendMessage', text: text })
     })
       .then(function(res) { return res.json(); })
-      .then(function() {
+      .then(function(result) {
         btn.disabled = false;
-        loadHistory();
+        if (result.user) appendMessage(result.user);
+        if (result.bot) appendMessage(result.bot);
       })
       .catch(function(err) {
         btn.disabled = false;
@@ -317,13 +362,20 @@
   }
 
   document.getElementById('bubble').addEventListener('click', toggleChat);
-  document.getElementById('pipBtn').addEventListener('click', enterPiP);
-  document.getElementById('minimizeBtn').addEventListener('click', minimizeChat);
-  document.getElementById('closeBtn').addEventListener('click', closeChat);
+  document.getElementById('pipBtn').addEventListener('click', function(e) { e.stopPropagation(); enterPiP(); });
+  document.getElementById('minimizeBtn').addEventListener('click', function(e) { e.stopPropagation(); minimizeChat(); });
+  document.getElementById('closeBtn').addEventListener('click', function(e) { e.stopPropagation(); closeChat(); });
+  document.getElementById('dockBtn').addEventListener('click', function(e) { e.stopPropagation(); toggleDock(); });
   document.getElementById('taskbarTab').addEventListener('click', restoreChat);
   document.getElementById('sendBtn').addEventListener('click', send);
   document.getElementById('chatInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') send();
+  });
+  // Bấm vào bất kỳ đâu trên cửa sổ khi đang docked sẽ mở lại
+  chatWindowEl.addEventListener('click', function() {
+    if (chatWindowEl.classList.contains('docked')) {
+      chatWindowEl.classList.remove('docked');
+    }
   });
 </script>
 
