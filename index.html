@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Chat Box</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: transparent;
+  }
+
+  #bubble {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: #4A90D9;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    z-index: 9999;
+    transition: transform 0.15s;
+  }
+  #bubble:hover { transform: scale(1.08); }
+
+  #chatWindow {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 320px;
+    height: 420px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 9999;
+  }
+  #chatWindow.open { display: flex; }
+  #chatWindow.pip-mode {
+    position: static;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  #chatHeader {
+    background: #4A90D9;
+    color: #fff;
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  #chatHeader .controls { cursor: pointer; font-size: 16px; padding: 0 6px; }
+
+  #chatBody {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    background: #f5f7fa;
+  }
+  .msg {
+    max-width: 80%;
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.4;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    background: #4A90D9;
+    color: #fff;
+    margin-left: auto;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.bot {
+    background: #e4e6eb;
+    color: #222;
+    margin-right: auto;
+    border-bottom-left-radius: 4px;
+  }
+  .msg .time {
+    display: block;
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 2px;
+  }
+
+  #chatFooter {
+    display: flex;
+    border-top: 1px solid #eee;
+    padding: 8px;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  #chatInput {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    padding: 8px 12px;
+    font-size: 13px;
+    outline: none;
+  }
+  #sendBtn {
+    background: #4A90D9;
+    color: #fff;
+    border: none;
+    border-radius: 20px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #sendBtn:disabled { opacity: 0.5; cursor: default; }
+
+  #taskbarTab {
+    position: fixed;
+    bottom: 0;
+    right: 20px;
+    background: #4A90D9;
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 8px 8px 0 0;
+    font-size: 12px;
+    cursor: pointer;
+    display: none;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+    z-index: 9999;
+  }
+  #taskbarTab.show { display: block; }
+</style>
+</head>
+<body>
+
+<!--
+  QUAN TRỌNG: dán URL Web App Apps Script (kết thúc bằng /exec) vào đây
+  trước khi dùng. Lấy URL này ở Apps Script > Deploy > Manage deployments.
+-->
+<script>
+  var API_URL = https://script.google.com/macros/s/AKfycbx4BUYVqRLI5Kidm6G1tbIkCGQnYedF98kjzeTfCjVIfsjGk0RoBBukRAs8DfQ_uZZo;
+</script>
+
+<div id="bubble">💬</div>
+
+<div id="chatWindow">
+  <div id="chatHeader">
+    <span>Chat Box</span>
+    <span>
+      <span class="controls" id="pipBtn" title="Nổi cửa sổ ra ngoài (Picture-in-Picture)">📌</span>
+      <span class="controls" id="minimizeBtn">—</span>
+      <span class="controls" id="closeBtn">✕</span>
+    </span>
+  </div>
+  <div id="chatBody"></div>
+  <div id="chatFooter">
+    <input id="chatInput" type="text" placeholder="Nhập tin nhắn...">
+    <button id="sendBtn">Gửi</button>
+  </div>
+</div>
+
+<div id="taskbarTab">💬 Chat Box</div>
+
+<script>
+  var isOpen = false;
+  var pipWindow = null;
+
+  function toggleChat() {
+    isOpen ? closeChat() : openChat();
+  }
+
+  function openChat() {
+    document.getElementById('chatWindow').classList.add('open');
+    document.getElementById('taskbarTab').classList.remove('show');
+    document.getElementById('bubble').style.display = 'none';
+    isOpen = true;
+    loadHistory();
+  }
+
+  function closeChat() {
+    if (pipWindow) {
+      pipWindow.close();
+      return;
+    }
+    document.getElementById('chatWindow').classList.remove('open');
+    document.getElementById('bubble').style.display = 'flex';
+    document.getElementById('taskbarTab').classList.remove('show');
+    isOpen = false;
+  }
+
+  function minimizeChat() {
+    if ('documentPictureInPicture' in window) {
+      enterPiP();
+      return;
+    }
+    document.getElementById('chatWindow').classList.remove('open');
+    document.getElementById('bubble').style.display = 'none';
+    document.getElementById('taskbarTab').classList.add('show');
+    isOpen = false;
+  }
+
+  function restoreChat() {
+    document.getElementById('chatWindow').classList.add('open');
+    document.getElementById('taskbarTab').classList.remove('show');
+    isOpen = true;
+    loadHistory();
+  }
+
+  async function enterPiP() {
+    if (!('documentPictureInPicture' in window)) {
+      alert('Trình duyệt này không hỗ trợ chế độ nổi. Cần dùng bản Chrome mới.');
+      return;
+    }
+    if (pipWindow) return;
+
+    try {
+      pipWindow = await documentPictureInPicture.requestWindow({
+        width: 320,
+        height: 420
+      });
+    } catch (err) {
+      alert('Không mở được cửa sổ nổi. Lỗi: ' + err.name + ' - ' + err.message);
+      return;
+    }
+
+    [...document.styleSheets].forEach(function(styleSheet) {
+      try {
+        var cssRules = [...styleSheet.cssRules].map(function(rule){ return rule.cssText; }).join('');
+        var style = document.createElement('style');
+        style.textContent = cssRules;
+        pipWindow.document.head.appendChild(style);
+      } catch (e) {
+        if (styleSheet.href) {
+          var link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = styleSheet.href;
+          pipWindow.document.head.appendChild(link);
+        }
+      }
+    });
+    pipWindow.document.body.style.margin = '0';
+
+    var chatWindow = document.getElementById('chatWindow');
+    chatWindow.classList.add('open', 'pip-mode');
+    pipWindow.document.body.appendChild(chatWindow);
+
+    document.getElementById('bubble').style.display = 'none';
+    document.getElementById('taskbarTab').classList.remove('show');
+    isOpen = true;
+
+    pipWindow.addEventListener('pagehide', function() {
+      chatWindow.classList.remove('pip-mode');
+      document.body.appendChild(chatWindow);
+      document.getElementById('bubble').style.display = 'flex';
+      pipWindow = null;
+      isOpen = false;
+    });
+  }
+
+  function renderMessages(history) {
+    var doc = pipWindow ? pipWindow.document : document;
+    var bodyEl = doc.getElementById('chatBody');
+    if (!bodyEl) return;
+    bodyEl.innerHTML = '';
+    history.forEach(function(m) {
+      var div = doc.createElement('div');
+      div.className = 'msg ' + (m.sender === 'user' ? 'user' : 'bot');
+      div.innerHTML = m.text.replace(/</g,'&lt;') + '<span class="time">' + m.time + '</span>';
+      bodyEl.appendChild(div);
+    });
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
+  function loadHistory() {
+    fetch(API_URL + '?action=loadHistory')
+      .then(function(res) { return res.json(); })
+      .then(renderMessages)
+      .catch(function(err) { console.error('Lỗi tải lịch sử:', err); });
+  }
+
+  function send() {
+    var doc = pipWindow ? pipWindow.document : document;
+    var input = doc.getElementById('chatInput');
+    var text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    var btn = doc.getElementById('sendBtn');
+    btn.disabled = true;
+
+    fetch(API_URL, {
+      method: 'POST',
+      body: new URLSearchParams({ action: 'sendMessage', text: text })
+    })
+      .then(function(res) { return res.json(); })
+      .then(function() {
+        btn.disabled = false;
+        loadHistory();
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        alert('Lỗi gửi tin nhắn: ' + err.message);
+      });
+  }
+
+  document.getElementById('bubble').addEventListener('click', toggleChat);
+  document.getElementById('pipBtn').addEventListener('click', enterPiP);
+  document.getElementById('minimizeBtn').addEventListener('click', minimizeChat);
+  document.getElementById('closeBtn').addEventListener('click', closeChat);
+  document.getElementById('taskbarTab').addEventListener('click', restoreChat);
+  document.getElementById('sendBtn').addEventListener('click', send);
+  document.getElementById('chatInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') send();
+  });
+</script>
+
+</body>
+</html>
