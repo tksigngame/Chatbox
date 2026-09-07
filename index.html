@@ -174,7 +174,7 @@
   trước khi dùng. Lấy URL này ở Apps Script > Deploy > Manage deployments.
 -->
 <script>
-  var API_URL = https://script.google.com/macros/s/AKfycbxUhcmEtxiE-Zxcb7n9aNZmaeAvbdio6XO1hYCyPr8XRP_U1-b68etuGSU6PTD0cM2J;
+  var API_URL = https://script.google.com/macros/s/AKfycbzY55U3Pt8DXTp9lwM3pXxL-598jVdt3ICkiC3G66h3uZMDa3cHptyXemQsroKX4YTJ;
 </script>
 
 <div id="bubble">💬</div>
@@ -342,8 +342,21 @@
     var text = input.value.trim();
     if (!text) return;
     input.value = '';
+
+    // Hiện tin nhắn của mình ngay lập tức, không chờ server
+    var nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    appendMessage({ sender: 'user', text: text, time: nowStr });
+
     var btn = doc.getElementById('sendBtn');
     btn.disabled = true;
+
+    var bodyEl = doc.getElementById('chatBody');
+    var typingDiv = doc.createElement('div');
+    typingDiv.className = 'msg bot';
+    typingDiv.id = 'typingIndicator';
+    typingDiv.textContent = 'Đang trả lời...';
+    bodyEl.appendChild(typingDiv);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
 
     fetch(API_URL, {
       method: 'POST',
@@ -352,11 +365,14 @@
       .then(function(res) { return res.json(); })
       .then(function(result) {
         btn.disabled = false;
-        if (result.user) appendMessage(result.user);
+        var t = doc.getElementById('typingIndicator');
+        if (t) t.remove();
         if (result.bot) appendMessage(result.bot);
       })
       .catch(function(err) {
         btn.disabled = false;
+        var t = doc.getElementById('typingIndicator');
+        if (t) t.remove();
         alert('Lỗi gửi tin nhắn: ' + err.message);
       });
   }
